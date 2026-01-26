@@ -1,194 +1,230 @@
-import threading
-import time
-import math
-import array
-import sys
-import os
-from string import punctuation
+import os, sys, warnings, threading, time, math, array
+import numpy as np
 
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+warnings.filterwarnings("ignore", category=UserWarning, module='pygame')
+
 import pygame
 
-SCORE_FILE = input("Score file: ") + ".txt"
+# Audio Settings
+EQ_LOW = 1.4
+EQ_MID = 1.5
+EQ_HIGH = 0.2
+VOLUME = 0.12
+
+SAMPLE_RATE = 44100
+SAMPLE_SIZE = -16
+CHANNELS = 1
+BUFFER_SIZE = 64
+MAX_VOICES = 8000
+
+# Envelope (In decimal percent)
+ATTACK = 0.05
+DECAY = 0.2
+
+# Simulator Things
+SCORE_FILENAME = input("Score file: ") + ".txt"
 RADIO_BUS = -1
-RUNNING = True
-current_status = {}
+AUDIO_ACTIVE = True
+CURRENT_BPM = 0
 
-# Metadata Defaults
-# (BPB = Beats per bar)
-METADATA = {
-    "SONG": "Unknown",
-    "AUTHOR": "Unknown",
-    "BPM": 120,
-    "BPB": 16
-}
+# Structures
+NOTE_MAP = {'C':0, 'C#':1, 'D':2, 'D#':3, 'E':4, 'F':5, 'F#':6, 'G':7, 'G#':8, 'A':9, 'A#':10, 'B':11}
+SONG_METADATA = {"SONG": "Unknown", "AUTHOR": "Unknown", "BPM": 120, "BPB": 16}
 
-def load_score(filename):
-    global METADATA
-    parts = {}
-    current_part = None
-    filename = "scores/" + filename
-    
-    if not os.path.exists(filename):
-        print(f"Error: {filename} not found!")
-        sys.exit()
+def load_score_file(filename):
+    file_path = f"scores/{filename}"
 
-    with open(filename, 'r', encoding='utf-8') as f:
-        for line in f:
+    if not os.path.exists(file_path):
+        sys.exit(f"Error: {file_path} not found!")
+
+    global SONG_METADATA
+    parts, tempo_map = {}, {}
+    current_part_name = None
+
+    with open(file_path, 'r', encoding='utf-8') as score:
+        for line in score:
             line = line.strip()
             if not line or line.startswith('#'): continue
-            
-            if ":" in line and not line.startswith('[') and current_part is None:
+
+            if ":" in line and not line.startswith('[') and current_part_name is None:
                 key, value = line.split(':', 1)
+                
                 key = key.strip().upper()
-                if key in METADATA:
-                    if key == "BPM": METADATA["BPM"] = int(value.strip())
-                    elif key == "BPB": METADATA["BPB"] = int(value.strip())
-                    else: METADATA[key] = value.strip()
+                val = value.strip()
+                
+                if key in SONG_METADATA: SONG_METADATA[key] = int(val) if val.isdigit() else val
+
                 continue
-
+            
             if line.startswith('[') and line.endswith(']'):
-                current_part = line[1:-1]
-                parts[current_part] = ""
-            elif current_part:
-                parts[current_part] += line + " "
-    return parts
+                current_part_name = line[1:-1]
+                parts[current_part_name] = ""
+            elif current_part_name:
+                parts[current_part_name] += line + " "
 
-# Audio engine
-pygame.mixer.pre_init(44100, -16, 1, 512)
-pygame.init()
+    if "CONDUCTOR" in parts:
+        raw_conductor, t_ptr = parts.pop("CONDUCTOR"), 0
 
-def note_to_freq(note_str):
-    if not note_str or any(c in note_str.upper() for c in ["R", "-", " "]): 
-        return 0
-    notes = {'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5, 
-             'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11}
+        for item in raw_conductor.split():
+            bpm_val, dur = item.split(':') if ":" in item else (item, 4)
+            tempo_map[t_ptr] = int(bpm_val)
+            t_ptr += int(dur)
+    else:
+        tempo_map = {0: SONG_METADATA["BPM"]}
+
+    return parts, tempo_map
+
+def note_to_frequency(note_str):
+    if not note_str or any(c in note_str.upper() for c in ["R", "-", " "]): return 0
+
     try:
-        name = note_str.split(':')[0].upper()
-        octave = int(name[-1]) if name[-1].isdigit() else 4
-        note_name = name[:-1] if name[-1].isdigit() else name
-        n = notes[note_name] + (octave + 1) * 12
+        raw_name = note_str.split(':')[0].upper()
+
+        octave = int(raw_name[-1]) if raw_name[-1].isdigit() else 4
+        note_name = raw_name[:-1] if raw_name[-1].isdigit() else raw_name
+
+        n = NOTE_MAP[note_name] + (octave + 1) * 12
         return 440 * (2 ** ((n - 69) / 12))
-    except: return 0
+    except:
+        return 0
 
-def parse_score(score_string):
-    raw_notes = score_string.split()
-    processed_notes = []
-    current_time = 0
-    for item in raw_notes:
-        note_part, duration = item.split(':') if ":" in item else (item, 4)
-        processed_notes.append({'start': current_time, 'note': note_part, 'duration': int(duration)})
-        current_time += int(duration)
-    return processed_notes, current_time
-
-def generate_tone(frequency, duration_beats, volume=0.12): 
+def generate_tone(frequency, duration_seconds): 
     if frequency <= 0: return None
-    duration_ms = (duration_beats / 4) * (60000 / METADATA["BPM"])
-    sample_rate = 44100
-    n_samples = int(sample_rate * (duration_ms / 1000.0))
-    samples = array.array('h')
-    
-    for i in range(n_samples):
-        t = float(i) / sample_rate
-        val = math.sin(2.0 * math.pi * frequency * t)
-        attack, decay = int(n_samples * 0.05), int(n_samples * 0.2)
-        if i < attack: val *= (i / attack)
-        elif i > (n_samples - decay): val *= ((n_samples - i) / decay)
-        samples.append(int(32767 * val * volume))
-    return pygame.mixer.Sound(buffer=samples)
 
-def virtual_microbit(name, score_string):
-    global RADIO_BUS, RUNNING, current_status
-    score, _ = parse_score(score_string)
+    total_samples = int(SAMPLE_RATE * duration_seconds)
+    audio_buffer = array.array('h')
+    current_note_volume = VOLUME
+
+    if frequency < 261:
+        current_note_volume *= EQ_LOW
+    elif frequency > 2000:
+        current_note_volume *= EQ_HIGH
+    else:
+        current_note_volume *= EQ_MID
+
+    attack_pct, decay_pct = ATTACK, (DECAY if frequency >= 261 else ATTACK)
+    attack_samples, decay_samples = int(total_samples * attack_pct), int(total_samples * decay_pct)
+
+    for i in range(total_samples):
+        time = float(i) / SAMPLE_RATE
+        val = math.sin(2.0 * math.pi * frequency * time)
+
+        if frequency < 261:
+            val = math.tanh(((val * 0.75) + (0.25 * math.sin(4.0 * math.pi * frequency * time))) * 1.1)
+        if frequency > 2000:
+            val = math.tanh(val * 0.8)
+
+        if i < attack_samples:
+            val *= (i / attack_samples)
+        elif i > (total_samples - decay_samples):
+            val *= ((total_samples - i) / decay_samples)
+
+        audio_buffer.append(int(np.iinfo(np.int16).max * math.tanh(val * current_note_volume)))
+    
+    return pygame.mixer.Sound(buffer=audio_buffer)
+
+def voice_worker_thread(part_batch, tempo_map):
+    minute, second, quarter = 60000, 1000.0, 4
+
+    global RADIO_BUS, AUDIO_ACTIVE
+    parsed_voices, tempo_ticks = [], sorted(tempo_map.keys())
+
+    for part_name, score_string in part_batch:
+        events, tick_ptr = [], 0
+
+        for item in score_string.split():
+            note, duration_ticks = item.split(':') if ":" in item else (item, 4)
+            duration_ticks = int(duration_ticks)
+            active_bpm = tempo_map[0]
+
+            for t in tempo_ticks:
+                if t <= tick_ptr:
+                    active_bpm = tempo_map[t]
+                else:
+                    break
+            
+            dur_seconds = (duration_ticks / quarter) * (minute / active_bpm) / second
+
+            events.append({'time': tick_ptr, 'hz': note_to_frequency(note), 'duration': dur_seconds})
+            tick_ptr += duration_ticks
+        
+        parsed_voices.append(events)
+
     last_tick = -1
-    while RUNNING:
+    while AUDIO_ACTIVE:
         if RADIO_BUS != last_tick:
             tick = RADIO_BUS
             last_tick = tick
-            for note_data in score:
-                if note_data['start'] == tick:
-                    current_status[name] = note_data['note']
-                    freq = note_to_freq(note_data['note'])
-                    if freq > 0:
-                        sound = generate_tone(freq, note_data['duration'])
-                        if sound: sound.play()
+
+            for voice in parsed_voices:
+                for ev in voice:
+                    snd = generate_tone(ev['hz'], ev['duration']) if ev['time'] == tick else None
+                    if snd: snd.play()
         time.sleep(0.001)
 
-def conductor(total_ticks):
-    global RADIO_BUS, RUNNING, current_status
-    os.system('') 
-    
-    bpm = METADATA["BPM"]
-    seconds_per_tick = (60 / bpm) / 4
-    
-    total_duration_sec = total_ticks * seconds_per_tick
-    total_min = int(total_duration_sec // 60)
-    total_sec = int(total_duration_sec % 60)
-    total_time_str = f"{total_min}:{total_sec:02}"
-    
-    VOICES_PER_ROW = 8
-    num_voices = len(current_status)
-    rows_needed = math.ceil(num_voices / VOICES_PER_ROW)
-    total_dashboard_lines = rows_needed + 5
-    
-    print("\n" * total_dashboard_lines) 
-    
-    for t in range(total_ticks + 1):
-        if not RUNNING: break
-        RADIO_BUS = t
-        
-        # Calculate current time
-        current_duration_sec = t * seconds_per_tick
-        cur_min = int(current_duration_sec // 60)
-        cur_sec = int(current_duration_sec % 60)
-        time_display = f"{cur_min}:{cur_sec:02} / {total_time_str}"
-        
-        measure = (t // METADATA["BPB"]) + 1
-        
-        sys.stdout.write("\033[F" * total_dashboard_lines)
+def run_conductor_ui(total_ticks, tempo_map):
+    global RADIO_BUS, AUDIO_ACTIVE, CURRENT_BPM
+    minute, half_min, quarter = 60, 30, 4
 
-        sys.stdout.write(f"🎵 {METADATA['AUTHOR']} - {METADATA['SONG']}\n")
-        sys.stdout.write(f"TICK: {t:04} | MEASURE: {measure:02}\n\n")
-        
-        voice_keys = sorted(current_status.keys(), key=lambda x: int(''.join(filter(str.isdigit, x)) or 0))
-        for i in range(0, len(voice_keys), VOICES_PER_ROW):
-            row_slice = voice_keys[i:i+VOICES_PER_ROW]
-            row_str = ""
-            for name in row_slice:
-                note = current_status[name]
-                voice_num = "".join(filter(str.isdigit, name))
-                short_id = f"V{voice_num}"
-                
-                row_str += f"[{short_id}] {note:<5} "
-            sys.stdout.write(f"{row_str:<100}\n")
-            
-        bar_len = 40
-        progress = t / total_ticks if total_ticks > 0 else 0
-        filled = int(bar_len * progress)
-        bar = "█" * filled + "░" * (bar_len - filled)
-        sys.stdout.write(f"\n[{bar}] {time_display}\n")
-        
-        sys.stdout.flush()
-        
-        time.sleep(seconds_per_tick)
+    os.system(("cls||clear"))
     
-    RUNNING = False
+    total_song_seconds, temp_bpm = 0, 120
+    for t in range(total_ticks):
+        if t in tempo_map: temp_bpm = tempo_map[t]
+        total_song_seconds += (minute / temp_bpm) / quarter
+    formatted_total = f"{int(total_song_seconds // minute)}:{int(total_song_seconds % minute):02}"
+
+    song_elapsed_seconds = 0.0
+    last_tick_time = time.perf_counter()
+    
+    print("\n")
+    sys.stdout.write(f" 🎵 {SONG_METADATA['SONG']}\n    {SONG_METADATA['AUTHOR']}\n\n")
+
+    for tick in range(total_ticks + 1):
+        if not AUDIO_ACTIVE: break
+
+        RADIO_BUS = tick
+        if tick in tempo_map:
+            CURRENT_BPM = tempo_map[tick]
+        sec_per_tick = (minute / CURRENT_BPM) / quarter
+        song_elapsed_seconds += sec_per_tick
+        
+        if tick % 4 == 0:
+            sys.stdout.write("\033[1F") # Move cursor up 1 line to overwrite progress and time
+
+            progress = int(half_min * np.clip(tick / total_ticks, 0, np.inf))
+            bar = "█" * progress + "░" * (half_min - progress)
+
+            cur_time = f"{int(song_elapsed_seconds // minute)}:{int(song_elapsed_seconds % minute):02}"
+
+            sys.stdout.write(f"\n [{bar}] {cur_time} / {formatted_total} ")
+            sys.stdout.flush()
+        
+        time.sleep(np.clip((last_tick_time + sec_per_tick) - time.perf_counter(), 0, np.inf))
+        last_tick_time = time.perf_counter()
+
+    AUDIO_ACTIVE = False
 
 if __name__ == "__main__":
-    PARTS = load_score(SCORE_FILE)
-    current_status = {name: "-" for name in PARTS.keys()}
-    max_ticks = 0
-    for name, score_str in PARTS.items():
-        _, length = parse_score(score_str)
-        max_ticks = max(max_ticks, length)
-    
-    for name, score_str in PARTS.items():
-        threading.Thread(target=virtual_microbit, args=(name, score_str), daemon=True).start()
-    
-    try:
-        conductor(max_ticks)
-    except KeyboardInterrupt:
-        RUNNING = False
+    pygame.mixer.pre_init(SAMPLE_RATE, SAMPLE_SIZE, CHANNELS, BUFFER_SIZE)
+    pygame.init()
+    pygame.mixer.set_num_channels(MAX_VOICES)
 
-    pygame.mixer.stop()
+    PARTS_DATA, TEMPO_MAP = load_score_file(SCORE_FILENAME)
+
+    max_time = 0
+    for _, score in PARTS_DATA.items():
+        duration = sum(int(i.split(':')[1] if ":" in i else 4) for i in score.split())
+        max_time = max(max_time, duration)
+
+    items = list(PARTS_DATA.items())
+    chunk = math.ceil(len(items) / 10)
+
+    for i in range(0, len(items), chunk):
+        threading.Thread(target=voice_worker_thread, args=(items[i: i+chunk], TEMPO_MAP), daemon=True).start()
+    
+    try: run_conductor_ui(max_time, TEMPO_MAP)
+    except KeyboardInterrupt: AUDIO_ACTIVE = False
+
     pygame.quit()
