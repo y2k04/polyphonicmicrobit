@@ -53,7 +53,7 @@ def load_score_file(filename):
                 key = key.strip().upper()
                 val = value.strip()
                 
-                if key in SONG_METADATA: SONG_METADATA[key] = float(val) if val.isdigit() else val
+                if key in SONG_METADATA: SONG_METADATA[key] = int(val) if val.isdigit() else val
 
                 continue
             
@@ -68,8 +68,8 @@ def load_score_file(filename):
 
         for item in raw_conductor.split():
             bpm_val, dur = item.split(':') if ":" in item else (item, 4)
-            tempo_map[t_ptr] = float(bpm_val)
-            t_ptr += float(dur)
+            tempo_map[t_ptr] = int(bpm_val)
+            t_ptr += int(dur)
     else:
         tempo_map = {0: SONG_METADATA["BPM"]}
 
@@ -107,11 +107,11 @@ def generate_tone(frequency, duration_seconds):
     attack_samples, decay_samples = float(total_samples * attack_pct), float(total_samples * decay_pct)
 
     for i in range(total_samples):
-        time = float(i / SAMPLE_RATE)
-        val = math.sin(2.0 * math.pi * frequency * time)
+        time = int(i) / SAMPLE_RATE
+        val = math.sin(2 * math.pi * frequency * time)
 
         if frequency < 261:
-            val = math.tanh(((val * 0.75) + (0.25 * math.sin(4.0 * math.pi * frequency * time))) * 1.1)
+            val = math.tanh(((val * 0.75) + (0.25 * math.sin(4 * math.pi * frequency * time))) * 1.1)
         if frequency > 2000:
             val = math.tanh(val * 1.1)
 
@@ -125,7 +125,7 @@ def generate_tone(frequency, duration_seconds):
     return pygame.mixer.Sound(buffer=audio_buffer)
 
 def voice_worker_thread(part_batch, tempo_map):
-    minute, second, quarter = 60000.0, 1000, 4
+    minute, second, quarter = 60000, 1000, 4
 
     global RADIO_BUS, AUDIO_ACTIVE
     parsed_voices, tempo_ticks = [], sorted(tempo_map.keys())
@@ -135,7 +135,7 @@ def voice_worker_thread(part_batch, tempo_map):
 
         for item in score_string.split():
             note, duration_ticks = item.split(':') if ":" in item else (item, 4)
-            duration_ticks = float(duration_ticks)
+            duration_ticks = int(duration_ticks)
             active_bpm = tempo_map[0]
 
             for t in tempo_ticks:
@@ -171,13 +171,13 @@ def run_conductor_ui(total_ticks, tempo_map):
 
     os.system(("cls||clear"))
     
-    total_song_seconds, temp_bpm = 0, 120.0
+    total_song_seconds, temp_bpm = 0, 120
     for t in range(total_ticks + 1):
         if t in tempo_map: temp_bpm = tempo_map[t]
         total_song_seconds += (minute / temp_bpm) / quarter
     formatted_total = f"{int(total_song_seconds // minute)}:{int(total_song_seconds % minute):02}"
 
-    song_elapsed_seconds = 0.0
+    song_elapsed_seconds = 0
     last_tick_time = time.perf_counter()
     
     print("\n")
@@ -195,7 +195,7 @@ def run_conductor_ui(total_ticks, tempo_map):
         if tick % 4 == 0:
             sys.stdout.write("\033[1F") # Move cursor up 1 line to overwrite progress and time
 
-            progress = int(half_min * np.clip(tick / total_ticks, 0.0, np.inf))
+            progress = int(half_min * np.clip(tick / total_ticks, 0, np.inf))
             bar = "█" * progress + "░" * (half_min - progress)
 
             cur_time = f"{int(song_elapsed_seconds // minute)}:{int(song_elapsed_seconds % minute):02}"
@@ -203,7 +203,7 @@ def run_conductor_ui(total_ticks, tempo_map):
             sys.stdout.write(f"\n [{bar}] {cur_time} / {formatted_total} ")
             sys.stdout.flush()
         
-        time.sleep(np.clip((last_tick_time + sec_per_tick) - time.perf_counter(), 0.0, np.inf))
+        time.sleep(np.clip((last_tick_time + sec_per_tick) - time.perf_counter(), 0, np.inf))
         last_tick_time = time.perf_counter()
 
     AUDIO_ACTIVE = False
