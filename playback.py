@@ -172,7 +172,7 @@ def run_conductor_ui(total_ticks, tempo_map):
     os.system(("cls||clear"))
     
     total_song_seconds, temp_bpm = 0, 120.0
-    for t in range(total_ticks):
+    for t in range(total_ticks + 1):
         if t in tempo_map: temp_bpm = tempo_map[t]
         total_song_seconds += (minute / temp_bpm) / quarter
     formatted_total = f"{int(total_song_seconds // minute)}:{int(total_song_seconds % minute):02}"
