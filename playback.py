@@ -19,8 +19,8 @@ BUFFER_SIZE = 64
 MAX_VOICES = 8000
 
 # Envelope (In decimal percent)
-ATTACK = 0.05
-DECAY = 0.2
+ATTACK = 0.1
+DECAY = 0.1
 
 # Simulator Things
 SCORE_FILENAME = input("Score file: ") + ".txt"
@@ -53,7 +53,7 @@ def load_score_file(filename):
                 key = key.strip().upper()
                 val = value.strip()
                 
-                if key in SONG_METADATA: SONG_METADATA[key] = int(val) if val.isdigit() else val
+                if key in SONG_METADATA: SONG_METADATA[key] = float(val) if val.isdigit() else val
 
                 continue
             
@@ -68,8 +68,8 @@ def load_score_file(filename):
 
         for item in raw_conductor.split():
             bpm_val, dur = item.split(':') if ":" in item else (item, 4)
-            tempo_map[t_ptr] = int(bpm_val)
-            t_ptr += int(dur)
+            tempo_map[t_ptr] = float(bpm_val)
+            t_ptr += float(dur)
     else:
         tempo_map = {0: SONG_METADATA["BPM"]}
 
@@ -104,16 +104,16 @@ def generate_tone(frequency, duration_seconds):
         current_note_volume *= EQ_MID
 
     attack_pct, decay_pct = ATTACK, (DECAY if frequency >= 261 else ATTACK)
-    attack_samples, decay_samples = int(total_samples * attack_pct), int(total_samples * decay_pct)
+    attack_samples, decay_samples = float(total_samples * attack_pct), float(total_samples * decay_pct)
 
     for i in range(total_samples):
-        time = float(i) / SAMPLE_RATE
+        time = float(i / SAMPLE_RATE)
         val = math.sin(2.0 * math.pi * frequency * time)
 
         if frequency < 261:
             val = math.tanh(((val * 0.75) + (0.25 * math.sin(4.0 * math.pi * frequency * time))) * 1.1)
         if frequency > 2000:
-            val = math.tanh(val * 0.8)
+            val = math.tanh(val * 1.1)
 
         if i < attack_samples:
             val *= (i / attack_samples)
@@ -125,7 +125,7 @@ def generate_tone(frequency, duration_seconds):
     return pygame.mixer.Sound(buffer=audio_buffer)
 
 def voice_worker_thread(part_batch, tempo_map):
-    minute, second, quarter = 60000.0, 1000.0, 4.0
+    minute, second, quarter = 60000.0, 1000, 4
 
     global RADIO_BUS, AUDIO_ACTIVE
     parsed_voices, tempo_ticks = [], sorted(tempo_map.keys())
@@ -135,7 +135,7 @@ def voice_worker_thread(part_batch, tempo_map):
 
         for item in score_string.split():
             note, duration_ticks = item.split(':') if ":" in item else (item, 4)
-            duration_ticks = int(duration_ticks)
+            duration_ticks = float(duration_ticks)
             active_bpm = tempo_map[0]
 
             for t in tempo_ticks:
@@ -159,10 +159,11 @@ def voice_worker_thread(part_batch, tempo_map):
 
             for voice in parsed_voices:
                 for ev in voice:
-                    snd = generate_tone(ev['hz'], ev['duration']) if ev['time'] == tick else None
-                    if snd: snd.play()
+                    if ev['time'] == tick:
+                        snd = generate_tone(ev['hz'], ev['duration'])
+                        if snd: snd.play()
         
-        time.sleep(0.001)
+        time.sleep(0)
 
 def run_conductor_ui(total_ticks, tempo_map):
     global RADIO_BUS, AUDIO_ACTIVE, CURRENT_BPM
@@ -170,7 +171,7 @@ def run_conductor_ui(total_ticks, tempo_map):
 
     os.system(("cls||clear"))
     
-    total_song_seconds, temp_bpm = 0, 120
+    total_song_seconds, temp_bpm = 0, 120.0
     for t in range(total_ticks):
         if t in tempo_map: temp_bpm = tempo_map[t]
         total_song_seconds += (minute / temp_bpm) / quarter
