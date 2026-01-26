@@ -125,7 +125,7 @@ def generate_tone(frequency, duration_seconds):
     return pygame.mixer.Sound(buffer=audio_buffer)
 
 def voice_worker_thread(part_batch, tempo_map):
-    minute, second, quarter = 60000, 1000.0, 4
+    minute, second, quarter = 60000.0, 1000.0, 4.0
 
     global RADIO_BUS, AUDIO_ACTIVE
     parsed_voices, tempo_ticks = [], sorted(tempo_map.keys())
@@ -161,11 +161,12 @@ def voice_worker_thread(part_batch, tempo_map):
                 for ev in voice:
                     snd = generate_tone(ev['hz'], ev['duration']) if ev['time'] == tick else None
                     if snd: snd.play()
+        
         time.sleep(0.001)
 
 def run_conductor_ui(total_ticks, tempo_map):
     global RADIO_BUS, AUDIO_ACTIVE, CURRENT_BPM
-    minute, half_min, quarter = 60, 30, 4
+    minute, half_min, quarter = 60.0, 30, 4.0
 
     os.system(("cls||clear"))
     
@@ -193,7 +194,7 @@ def run_conductor_ui(total_ticks, tempo_map):
         if tick % 4 == 0:
             sys.stdout.write("\033[1F") # Move cursor up 1 line to overwrite progress and time
 
-            progress = int(half_min * np.clip(tick / total_ticks, 0, np.inf))
+            progress = int(half_min * np.clip(tick / total_ticks, 0.0, np.inf))
             bar = "█" * progress + "░" * (half_min - progress)
 
             cur_time = f"{int(song_elapsed_seconds // minute)}:{int(song_elapsed_seconds % minute):02}"
@@ -201,7 +202,7 @@ def run_conductor_ui(total_ticks, tempo_map):
             sys.stdout.write(f"\n [{bar}] {cur_time} / {formatted_total} ")
             sys.stdout.flush()
         
-        time.sleep(np.clip((last_tick_time + sec_per_tick) - time.perf_counter(), 0, np.inf))
+        time.sleep(np.clip((last_tick_time + sec_per_tick) - time.perf_counter(), 0.0, np.inf))
         last_tick_time = time.perf_counter()
 
     AUDIO_ACTIVE = False
