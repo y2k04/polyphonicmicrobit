@@ -136,17 +136,22 @@ def voice_worker_thread(part_batch, tempo_map):
         for item in score_string.split():
             note, duration_ticks = item.split(':') if ":" in item else (item, 4)
             duration_ticks = int(duration_ticks)
-            active_bpm = tempo_map[0]
-
-            for t in tempo_ticks:
-                if t <= tick_ptr:
-                    active_bpm = tempo_map[t]
-                else:
-                    break
             
-            dur_seconds = (duration_ticks / quarter) * (minute / active_bpm) / second
+            # Calculate duration by summing small tick-steps if a note spans across multiple BPM changes
+            temp_tick = tick_ptr
+            total_dur_sec = 0
+            for _ in range(duration_ticks):
+                active_bpm = tempo_map[0]
+                for t in tempo_ticks:
+                    if t <= temp_tick:
+                        active_bpm = tempo_map[t]
+                    else:
+                        break
+                        
+                total_dur_sec += (1 / quarter) * (60.0 / active_bpm)
+                temp_tick += 1
 
-            events.append({'time': tick_ptr, 'hz': note_to_frequency(note), 'duration': dur_seconds})
+            events.append({'time': tick_ptr, 'hz': note_to_frequency(note), 'duration': total_dur_sec})
             tick_ptr += duration_ticks
         
         parsed_voices.append(events)

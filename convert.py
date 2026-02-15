@@ -52,13 +52,15 @@ def midi_to_score():
 
         for msg in track:
             absolute_tick += msg.time
-            engine_tick = round(absolute_tick / scale)
+            # Round to the nearest tick to prevent micro-shifts
+            engine_tick = int(round(absolute_tick / scale))
 
             if msg.type == 'note_on' and msg.velocity > 0:
                 active_notes[msg.note] = engine_tick
             elif (msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0)):
                 if msg.note in active_notes:
                     start_tick = active_notes[msg.note]
+                    # Ensure duration is at least 1 tick
                     duration = max(1, engine_tick - start_tick)
                     
                     octave = (msg.note // 12) - 1
@@ -81,22 +83,27 @@ def midi_to_score():
     # Calculate number of voices and distribute note events
     for note in all_notes:
         assigned = False
+        # Try to find a voice that is free at note['start']
         for v_idx in sorted(voices_end_time.keys()):
             if voices_end_time[v_idx] <= note['start']:
                 gap = note['start'] - voices_end_time[v_idx]
-                if gap > 0: voice_data[v_idx].append(f"-:{gap}")
+                
+                # Only add a rest if there is a gap of 1 tick or more
+                if gap > 0: 
+                    voice_data[v_idx].append(f"-:{gap}")
 
                 voice_data[v_idx].append(f"{note['name']}:{note['duration']}")
+                # Set the next available time for this voice to the end of this note
                 voices_end_time[v_idx] = note['end']
-
                 assigned = True
                 break
         
         if not assigned:
             new_idx = len(voices_end_time) + 1
             voice_data[new_idx] = []
-
-            if note['start'] > 0: voice_data[new_idx].append(f"-:{note['start']}")
+            # Start the new voice with a rest if the note doesn't start at 0
+            if note['start'] > 0: 
+                voice_data[new_idx].append(f"-:{note['start']}")
 
             voice_data[new_idx].append(f"{note['name']}:{note['duration']}")
             voices_end_time[new_idx] = note['end']
