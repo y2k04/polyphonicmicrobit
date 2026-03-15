@@ -15,7 +15,7 @@ VOLUME = 0.12
 SAMPLE_RATE = 44100
 SAMPLE_SIZE = -16
 CHANNELS = 1
-BUFFER_SIZE = 64
+BUFFER_SIZE = 1024
 MAX_VOICES = 8000
 
 # Envelope (In decimal percent)
@@ -33,7 +33,7 @@ NOTE_MAP = {'C':0, 'C#':1, 'D':2, 'D#':3, 'E':4, 'F':5, 'F#':6, 'G':7, 'G#':8, '
 SONG_METADATA = {"SONG": "Unknown", "AUTHOR": "Unknown", "BPM": 120, "BPB": 16}
 
 def load_score_file(filename):
-    file_path = f"scores/{filename}"
+    file_path = os.path.join("scores", filename)
 
     if not os.path.exists(file_path):
         sys.exit(f"Error: {file_path} not found!")
@@ -172,21 +172,25 @@ def voice_worker_thread(part_batch, tempo_map):
 
 def run_conductor_ui(total_ticks, tempo_map):
     global RADIO_BUS, AUDIO_ACTIVE, CURRENT_BPM
-    minute, half_min, quarter = 60.0, 30, 4.0
+    minute = 60.0
+    half_min = 30
 
-    os.system(("cls||clear"))
+    # Clear screen safely
+    os.system('cls' if os.name == 'nt' else 'clear')
     
-    total_song_seconds, temp_bpm = 0, 120
+    # Pre-calculate total time (existing logic is fine)
+    total_song_seconds = 0
+    temp_bpm = 120
     for t in range(total_ticks + 1):
         if t in tempo_map: temp_bpm = tempo_map[t]
-        total_song_seconds += (minute / temp_bpm) / quarter
+        total_song_seconds += (minute / temp_bpm) / 4.0
     formatted_total = f"{int(total_song_seconds // minute)}:{int(total_song_seconds % minute):02}"
+
+    print(f"\n 🎵 {SONG_METADATA['SONG']}")
+    print(f"    {SONG_METADATA['AUTHOR']}\n")
 
     song_elapsed_seconds = 0
     last_tick_time = time.perf_counter()
-    
-    print("\n")
-    sys.stdout.write(f" 🎵 {SONG_METADATA['SONG']}\n    {SONG_METADATA['AUTHOR']}\n\n")
 
     for tick in range(total_ticks + 1):
         if not AUDIO_ACTIVE: break
@@ -194,23 +198,26 @@ def run_conductor_ui(total_ticks, tempo_map):
         RADIO_BUS = tick
         if tick in tempo_map:
             CURRENT_BPM = tempo_map[tick]
-        sec_per_tick = (minute / CURRENT_BPM) / quarter
+            
+        sec_per_tick = (minute / CURRENT_BPM) / 4.0
         song_elapsed_seconds += sec_per_tick
         
         if tick % 4 == 0:
-            sys.stdout.write("\033[1F") # Move cursor up 1 line to overwrite progress and time
-
-            progress = int(half_min * np.clip(tick / total_ticks, 0, np.inf))
+            progress = int(half_min * np.clip(tick / total_ticks, 0, 1.0))
             bar = "█" * progress + "░" * (half_min - progress)
-
             cur_time = f"{int(song_elapsed_seconds // minute)}:{int(song_elapsed_seconds % minute):02}"
 
-            sys.stdout.write(f"\n [{bar}] {cur_time} / {formatted_total} ")
+            # \r returns to start of line, \033[K clears the line
+            sys.stdout.write(f"\r [{bar}] {cur_time} / {formatted_total} \033[K")
             sys.stdout.flush()
         
-        time.sleep(np.clip((last_tick_time + sec_per_tick) - time.perf_counter(), 0, np.inf))
+        # High-precision sleep
+        sleep_time = (last_tick_time + sec_per_tick) - time.perf_counter()
+        if sleep_time > 0:
+            time.sleep(sleep_time)
         last_tick_time = time.perf_counter()
 
+    print("\n\nPlayback Finished.")
     AUDIO_ACTIVE = False
 
 if __name__ == "__main__":
