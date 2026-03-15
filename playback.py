@@ -7,15 +7,15 @@ warnings.filterwarnings("ignore", category=UserWarning, module='pygame')
 import pygame
 
 # Audio Settings
-EQ_LOW = 1.4
+EQ_LOW = 1.8
 EQ_MID = 1.5
 EQ_HIGH = 0.2
-VOLUME = 0.12
+VOLUME = 0.2
 
 SAMPLE_RATE = 44100
 SAMPLE_SIZE = -16
 CHANNELS = 1
-BUFFER_SIZE = 1024
+BUFFER_SIZE = 2048
 MAX_VOICES = 8000
 
 # Envelope (In decimal percent)
@@ -52,14 +52,14 @@ def load_score_file(filename):
 
             if ":" in line and not line.startswith('[') and current_part_name is None:
                 key, value = line.split(':', 1)
-                
+
                 key = key.strip().upper()
                 val = value.strip()
-                
+
                 if key in SONG_METADATA: SONG_METADATA[key] = int(val) if val.isdigit() else val
 
                 continue
-            
+
             if line.startswith('[') and line.endswith(']'):
                 current_part_name = line[1:-1]
                 parts[current_part_name] = ""
@@ -96,44 +96,33 @@ def generate_tone(frequency, duration_seconds):
     if frequency <= 0: return None
 
     total_samples = int(SAMPLE_RATE * duration_seconds)
-    # Create a time array: [0.0, 0.000022, 0.000045, ...]
     t = np.linspace(0, duration_seconds, total_samples, False)
 
-    # 1. GENERATE BASE WAVE
-    # Basic sine wave
+    # 1. BASE WAVE
     val = np.sin(2 * np.pi * frequency * t)
 
-    # 2. APPLY TIMBRE (Bass/Treble processing)
+    # 2. BASS REINFORCEMENT (The "Sub" Fix)
     if frequency < 261:
-        # Add a sub-harmonic for bassier notes
-        val = np.tanh(((val * 0.75) + (0.25 * np.sin(4 * np.pi * frequency * t))) * 1.1)
-    elif frequency > 2000:
-        val = np.tanh(val * 1.1)
+        # Add a sub-octave (0.5x freq) for depth and a 2nd harmonic (2x freq) for body
+        sub = 0.5 * np.sin(1 * np.pi * frequency * t)
+        body = 0.3 * np.sin(4 * np.pi * frequency * t)
 
-    # 3. DEFINE FIXED ENVELOPE (The Note Length Fix)
-    # Attack is still percentage based (usually fine)
+        # Blend them and use a gentle tanh to glue it together
+        # We divide by 1.8 to keep the amplitude from clipping early
+        val = np.tanh((val + sub + body) / 1.2)
+
+    # 3. ENVELOPE
     attack_samples = int(total_samples * ATTACK)
-
-    # Decay/Release is now FIXED at 0.05 seconds so long notes don't pulse
     fixed_release_sec = 0.05
-    release_samples = int(SAMPLE_RATE * fixed_release_sec)
+    release_samples = min(int(SAMPLE_RATE * fixed_release_sec), total_samples // 2)
 
-    # Safety: Ensure release isn't longer than the note itself
-    if release_samples > (total_samples // 2):
-        release_samples = total_samples // 2
-
-    # Create the envelope array (starts at 1.0)
     envelope = np.ones(total_samples)
-
-    # Linear Fade In
     if attack_samples > 0:
         envelope[:attack_samples] = np.linspace(0, 1, attack_samples)
-
-    # Linear Fade Out
     if release_samples > 0:
         envelope[-release_samples:] = np.linspace(1, 0, release_samples)
 
-    # 4. APPLY VOLUME & MASTER TANH
+    # 4. GAIN STAGING
     current_note_volume = VOLUME
     if frequency < 261:
         current_note_volume *= EQ_LOW
@@ -142,11 +131,13 @@ def generate_tone(frequency, duration_seconds):
     else:
         current_note_volume *= EQ_MID
 
-    # Combine everything and clip using tanh for a "warm" limit
-    final_signal = np.tanh(val * envelope * current_note_volume)
+    # 5. MASTER SOFT-LIMITER
+    # We round off the final signal at 0.15 to prevent high-end buzzing
+    # while allowing the bass to remain thick.
+    raw_signal = val * envelope * current_note_volume
+    final_signal = np.tanh(raw_signal / 0.15) * 0.15
 
-    # 5. CONVERT TO INT16 (Required for Pygame buffer)
-    # Multiplying by 32767 scales float (-1.0 to 1.0) to signed short range
+    # 6. CONVERT TO INT16
     audio_data = (final_signal * 32767).astype(np.int16)
 
     return pygame.mixer.Sound(buffer=audio_data)
@@ -206,9 +197,9 @@ def voice_worker_thread(part_batch, tempo_map):
 def run_conductor_ui(total_ticks, tempo_map):
     global RADIO_BUS, AUDIO_ACTIVE, CURRENT_BPM
 
-    print("Generating audio buffers... Please wait.")
-    # Wait for ALL threads to check in
     while FINISHED_THREADS < TOTAL_THREADS_STARTED:
+        sys.stdout.write(f"\r[SYSTEM] Loading Voices... ({FINISHED_THREADS}/{TOTAL_THREADS_STARTED}) ")
+        sys.stdout.flush()
         time.sleep(0.1)
 
     minute = 60.0
@@ -216,7 +207,7 @@ def run_conductor_ui(total_ticks, tempo_map):
 
     # Clear screen safely
     os.system('cls' if os.name == 'nt' else 'clear')
-    
+
     # Pre-calculate total time (existing logic is fine)
     total_song_seconds = 0
     temp_bpm = 120
@@ -237,10 +228,10 @@ def run_conductor_ui(total_ticks, tempo_map):
         RADIO_BUS = tick
         if tick in tempo_map:
             CURRENT_BPM = tempo_map[tick]
-            
+
         sec_per_tick = (minute / CURRENT_BPM) / 4.0
         song_elapsed_seconds += sec_per_tick
-        
+
         if tick % 4 == 0:
             progress = int(half_min * np.clip(tick / total_ticks, 0, 1.0))
             bar = "█" * progress + "░" * (half_min - progress)
@@ -249,7 +240,7 @@ def run_conductor_ui(total_ticks, tempo_map):
             # \r returns to start of line, \033[K clears the line
             sys.stdout.write(f"\r [{bar}] {cur_time} / {formatted_total} \033[K")
             sys.stdout.flush()
-        
+
         # High-precision sleep
         sleep_time = (last_tick_time + sec_per_tick) - time.perf_counter()
         if sleep_time > 0:
@@ -281,7 +272,7 @@ if __name__ == "__main__":
         thread_count += 1
 
     TOTAL_THREADS_STARTED = thread_count
-    
+
     try: run_conductor_ui(max_time, TEMPO_MAP)
     except KeyboardInterrupt: AUDIO_ACTIVE = False
 
