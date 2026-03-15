@@ -15,7 +15,7 @@ VOLUME = 0.12
 SAMPLE_RATE = 44100
 SAMPLE_SIZE = -16
 CHANNELS = 1
-BUFFER_SIZE = 128
+BUFFER_SIZE = 1024
 MAX_VOICES = 8000
 
 # Envelope (In decimal percent)
@@ -27,6 +27,9 @@ SCORE_FILENAME = input("Score file: ") + ".txt"
 RADIO_BUS = -1
 AUDIO_ACTIVE = True
 CURRENT_BPM = 0
+
+FINISHED_THREADS = 0
+TOTAL_THREADS_STARTED = 0
 
 # Structures
 NOTE_MAP = {'C':0, 'C#':1, 'D':2, 'D#':3, 'E':4, 'F':5, 'F#':6, 'G':7, 'G#':8, 'A':9, 'A#':10, 'B':11}
@@ -89,13 +92,49 @@ def note_to_frequency(note_str):
     except:
         return 0
 
-def generate_tone(frequency, duration_seconds): 
+def generate_tone(frequency, duration_seconds):
     if frequency <= 0: return None
 
     total_samples = int(SAMPLE_RATE * duration_seconds)
-    audio_buffer = array.array('h')
-    current_note_volume = VOLUME
+    # Create a time array: [0.0, 0.000022, 0.000045, ...]
+    t = np.linspace(0, duration_seconds, total_samples, False)
 
+    # 1. GENERATE BASE WAVE
+    # Basic sine wave
+    val = np.sin(2 * np.pi * frequency * t)
+
+    # 2. APPLY TIMBRE (Bass/Treble processing)
+    if frequency < 261:
+        # Add a sub-harmonic for bassier notes
+        val = np.tanh(((val * 0.75) + (0.25 * np.sin(4 * np.pi * frequency * t))) * 1.1)
+    elif frequency > 2000:
+        val = np.tanh(val * 1.1)
+
+    # 3. DEFINE FIXED ENVELOPE (The Note Length Fix)
+    # Attack is still percentage based (usually fine)
+    attack_samples = int(total_samples * ATTACK)
+
+    # Decay/Release is now FIXED at 0.05 seconds so long notes don't pulse
+    fixed_release_sec = 0.05
+    release_samples = int(SAMPLE_RATE * fixed_release_sec)
+
+    # Safety: Ensure release isn't longer than the note itself
+    if release_samples > (total_samples // 2):
+        release_samples = total_samples // 2
+
+    # Create the envelope array (starts at 1.0)
+    envelope = np.ones(total_samples)
+
+    # Linear Fade In
+    if attack_samples > 0:
+        envelope[:attack_samples] = np.linspace(0, 1, attack_samples)
+
+    # Linear Fade Out
+    if release_samples > 0:
+        envelope[-release_samples:] = np.linspace(1, 0, release_samples)
+
+    # 4. APPLY VOLUME & MASTER TANH
+    current_note_volume = VOLUME
     if frequency < 261:
         current_note_volume *= EQ_LOW
     elif frequency > 2000:
@@ -103,41 +142,29 @@ def generate_tone(frequency, duration_seconds):
     else:
         current_note_volume *= EQ_MID
 
-    attack_pct, decay_pct = ATTACK, (DECAY if frequency >= 261 else ATTACK)
-    attack_samples, decay_samples = float(total_samples * attack_pct), float(total_samples * decay_pct)
+    # Combine everything and clip using tanh for a "warm" limit
+    final_signal = np.tanh(val * envelope * current_note_volume)
 
-    for i in range(total_samples):
-        time = int(i) / SAMPLE_RATE
-        val = math.sin(2 * math.pi * frequency * time)
+    # 5. CONVERT TO INT16 (Required for Pygame buffer)
+    # Multiplying by 32767 scales float (-1.0 to 1.0) to signed short range
+    audio_data = (final_signal * 32767).astype(np.int16)
 
-        if frequency < 261:
-            val = math.tanh(((val * 0.75) + (0.25 * math.sin(4 * math.pi * frequency * time))) * 1.1)
-        if frequency > 2000:
-            val = math.tanh(val * 1.1)
-
-        if i < attack_samples:
-            val *= (i / attack_samples)
-        elif i > (total_samples - decay_samples):
-            val *= ((total_samples - i) / decay_samples)
-
-        audio_buffer.append(int(np.iinfo(np.int16).max * math.tanh(val * current_note_volume)))
-    
-    return pygame.mixer.Sound(buffer=audio_buffer)
+    return pygame.mixer.Sound(buffer=audio_data)
 
 def voice_worker_thread(part_batch, tempo_map):
-    minute, second, quarter = 60000, 1000, 4
-
     global RADIO_BUS, AUDIO_ACTIVE
-    parsed_voices, tempo_ticks = [], sorted(tempo_map.keys())
+    parsed_voices = []
+    tempo_ticks = sorted(tempo_map.keys())
+    quarter = 4
 
+    # --- STEP 1: PRE-PROCESS AND PRE-GENERATE ---
     for part_name, score_string in part_batch:
-        events, tick_ptr = [], 0
-
+        events = []
+        tick_ptr = 0
         for item in score_string.split():
             note, duration_ticks = item.split(':') if ":" in item else (item, 4)
             duration_ticks = int(duration_ticks)
-            
-            # Calculate duration by summing small tick-steps if a note spans across multiple BPM changes
+
             temp_tick = tick_ptr
             total_dur_sec = 0
             for _ in range(duration_ticks):
@@ -147,31 +174,43 @@ def voice_worker_thread(part_batch, tempo_map):
                         active_bpm = tempo_map[t]
                     else:
                         break
-                        
                 total_dur_sec += (1 / quarter) * (60.0 / active_bpm)
                 temp_tick += 1
 
-            events.append({'time': tick_ptr, 'hz': note_to_frequency(note), 'duration': total_dur_sec})
+            hz = note_to_frequency(note)
+            # Pre-generate the sound object here!
+            snd = generate_tone(hz, total_dur_sec) if hz > 0 else None
+
+            events.append({'time': tick_ptr, 'snd': snd})
             tick_ptr += duration_ticks
-        
+
         parsed_voices.append(events)
 
+    global FINISHED_THREADS
+    FINISHED_THREADS += 1
+
+    # --- STEP 2: HIGH-SPEED PLAYBACK LOOP ---
     last_tick = -1
     while AUDIO_ACTIVE:
         if RADIO_BUS != last_tick:
             tick = RADIO_BUS
-            last_tick = tick
-
             for voice in parsed_voices:
                 for ev in voice:
                     if ev['time'] == tick:
-                        snd = generate_tone(ev['hz'], ev['duration'])
-                        if snd: snd.play()
-        
-        time.sleep(0)
+                        if ev['snd']:
+                            ev['snd'].play()
+            last_tick = tick
+
+        time.sleep(0.001) # Small sleep to prevent 100% CPU usage
 
 def run_conductor_ui(total_ticks, tempo_map):
     global RADIO_BUS, AUDIO_ACTIVE, CURRENT_BPM
+
+    print("Generating audio buffers... Please wait.")
+    # Wait for ALL threads to check in
+    while FINISHED_THREADS < TOTAL_THREADS_STARTED:
+        time.sleep(0.1)
+
     minute = 60.0
     half_min = 30
 
@@ -223,6 +262,7 @@ def run_conductor_ui(total_ticks, tempo_map):
 if __name__ == "__main__":
     pygame.mixer.pre_init(SAMPLE_RATE, SAMPLE_SIZE, CHANNELS, BUFFER_SIZE)
     pygame.init()
+    pygame.mixer.init()
     pygame.mixer.set_num_channels(MAX_VOICES)
 
     PARTS_DATA, TEMPO_MAP = load_score_file(SCORE_FILENAME)
@@ -235,8 +275,12 @@ if __name__ == "__main__":
     items = list(PARTS_DATA.items())
     chunk = math.ceil(len(items) / 10)
 
+    thread_count = 0
     for i in range(0, len(items), chunk):
         threading.Thread(target=voice_worker_thread, args=(items[i: i+chunk], TEMPO_MAP), daemon=True).start()
+        thread_count += 1
+
+    TOTAL_THREADS_STARTED = thread_count
     
     try: run_conductor_ui(max_time, TEMPO_MAP)
     except KeyboardInterrupt: AUDIO_ACTIVE = False
