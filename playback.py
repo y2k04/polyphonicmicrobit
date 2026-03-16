@@ -14,7 +14,7 @@ VOLUME = 0.2
 
 SAMPLE_RATE = 44100
 SAMPLE_SIZE = -16
-CHANNELS = 1
+CHANNELS = 2
 BUFFER_SIZE = 2048
 MAX_VOICES = 8000
 
@@ -139,8 +139,9 @@ def generate_tone(frequency, duration_seconds):
 
     # 6. CONVERT TO INT16
     audio_data = (final_signal * 32767).astype(np.int16)
+    stereo_data = np.column_stack((audio_data, audio_data))
 
-    return pygame.mixer.Sound(buffer=audio_data)
+    return pygame.mixer.Sound(buffer=stereo_data)
 
 def voice_worker_thread(part_batch, tempo_map):
     global RADIO_BUS, AUDIO_ACTIVE
@@ -276,4 +277,5 @@ if __name__ == "__main__":
     try: run_conductor_ui(max_time, TEMPO_MAP)
     except KeyboardInterrupt: AUDIO_ACTIVE = False
 
+    pygame.mixer.quit()
     pygame.quit()
