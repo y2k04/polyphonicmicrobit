@@ -7,4 +7,3 @@
 ### To-do
  - Document the networking protocol
  - Rewrite the micro:bit code generation for public use (JavaScript version)
- - Remove quantization to fix note "smooshing" (Why did I even put it even in)
