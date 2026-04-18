@@ -9,10 +9,10 @@ import numpy as np
 import sounddevice as sd
 
 # Audio Settings
-EQ_LOW = 1.4
+EQ_LOW = 1.3
 EQ_MID = 1.5
 EQ_HIGH = 0.05
-VOLUME = 1.0
+VOLUME = 0.6
 
 SAMPLE_RATE = 44100
 CHANNELS = 2
