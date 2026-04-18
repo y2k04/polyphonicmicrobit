@@ -6,43 +6,44 @@ SONG_NAME = input("Song Name: ")
 AUTHOR = input("Author: ")
 
 NOTE_MAP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-TICKS_PER_BEAT = 4 # Fixed 16th note resolution
 
 def midi_to_score():
     if not os.path.exists(os.path.dirname(OUTPUT_FILE)): os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     try: mid = mido.MidiFile(MIDI_INPUT)
     except Exception as e: return print(f"Error: {e}")
 
-    scale = mid.ticks_per_beat / TICKS_PER_BEAT
+    ticks_per_beat = mid.ticks_per_beat
     tempo_events = []
     for track in mid.tracks:
         abs_t = 0
         for msg in track:
             abs_t += msg.time
             if msg.type == 'set_tempo':
-                tempo_events.append((round(abs_t / scale), round(mido.tempo2bpm(msg.tempo))))
+                tempo_events.append((abs_t, mido.tempo2bpm(msg.tempo)))
 
     tempo_events.sort()
     unique_tempos = [tempo_events[0]] if tempo_events else []
     for i in range(1, len(tempo_events)):
         if tempo_events[i][0] != tempo_events[i-1][0]: unique_tempos.append(tempo_events[i])
 
-    initial_bpm = unique_tempos[0][1] if unique_tempos else 120
+    initial_bpm = unique_tempos[0][1] if unique_tempos else 120.0
     all_notes, active_notes = [], {}
 
-    for track in mid.tracks:
+    for track_idx, track in enumerate(mid.tracks):
+        is_drum_track = track_idx == 0 or any(msg.channel == 9 for msg in track if msg.type == 'note_on')  # Assume first track or has notes on channel 9
         abs_t = 0
         for msg in track:
             abs_t += msg.time
-            eng_t = round(abs_t / scale)
-            if msg.type == 'note_on' and msg.velocity > 0: active_notes[msg.note] = eng_t
+            eng_t = abs_t
+            if msg.type == 'note_on' and msg.velocity > 0:
+                active_notes[(msg.note, track_idx)] = (eng_t, msg.channel == 9)
             elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                if msg.note in active_notes:
-                    start = active_notes[msg.note]
+                if (msg.note, track_idx) in active_notes:
+                    start, is_drum = active_notes[(msg.note, track_idx)]
                     dur = max(1, eng_t - start)
-                    name = NOTE_MAP[msg.note % 12] + str((msg.note // 12) - 1)
-                    all_notes.append({'start': start, 'end': start + dur, 'name': name, 'dur': dur, 'pitch': msg.note})
-                    del active_notes[msg.note]
+                    name = NOTE_MAP[msg.note % 12] + str((msg.note // 12) - 1) if not is_drum else f"P{msg.note}"
+                    all_notes.append({'start': start, 'end': start + dur, 'name': name, 'dur': dur, 'pitch': msg.note, 'is_drum': is_drum})
+                    del active_notes[(msg.note, track_idx)]
 
     all_notes.sort(key=lambda x: (x['start'], -x['pitch']))
     v_end, v_data, max_tick = {}, {}, 0
@@ -67,8 +68,8 @@ def midi_to_score():
         if v_end[idx] < max_tick: v_data[idx].append(f"-:{max_tick - v_end[idx]}")
 
     with open(OUTPUT_FILE, "w", encoding='utf-8') as f:
-        f.write(f"SONG: {SONG_NAME}\nAUTHOR: {AUTHOR}\nBPM: {initial_bpm}\n\n[CONDUCTOR]\n")
-        if not unique_tempos: f.write(f"{initial_bpm}:{max(4, max_tick)}")
+        f.write(f"SONG: {SONG_NAME}\nAUTHOR: {AUTHOR}\nBPM: {initial_bpm}\nTPB: {ticks_per_beat}\n\n[CONDUCTOR]\n")
+        if not unique_tempos: f.write(f"{initial_bpm}:{max(1, max_tick)}")
         else:
             for i in range(len(unique_tempos)):
                 curr_t, curr_bpm = unique_tempos[i]
