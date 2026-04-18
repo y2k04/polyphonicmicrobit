@@ -127,7 +127,7 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
         val = np.random.normal(0, 1, total_samples)
         if frequency >= 30 and frequency <= 50:  # Hi-hats: sharper, higher frequency sound
             val = np.convolve(val, np.ones(5) / 5, mode='same')  # Very short smoothing for bright hi-hats
-            val *= 0.1  # Reduce volume to prevent drowning
+            val *= 0.08  # Reduce volume to prevent drowning
         else:  # Other drums: standard percussive
             val = np.convolve(val, np.ones(10) / 10, mode='same')
             val *= 12.0  # Base volume for drums
@@ -145,7 +145,6 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing
         elif frequency > 1000:
             val *= 0.75
-            val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing
 
         # 2. BASS REINFORCEMENT (The "Sub" Fix)
         if frequency < 261:
@@ -162,7 +161,7 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
     if frequency > 1046 and is_drum:
         attack_len = min(0.25, ATTACK + 0.08)
     attack_samples = int(total_samples * attack_len)
-    fixed_release_sec = 0.08 if is_drum else 0.05  # Longer release for drums
+    fixed_release_sec = 0.01 if is_drum else 0.05  # Longer release for drums
     release_samples = min(int(SAMPLE_RATE * fixed_release_sec), total_samples // 2)
 
     envelope = np.ones(total_samples, dtype=np.float32)
