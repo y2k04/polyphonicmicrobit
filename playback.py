@@ -9,8 +9,8 @@ import numpy as np
 import sounddevice as sd
 
 # Audio Settings
-EQ_LOW = 1.4
-EQ_MID = 1.6
+EQ_LOW = 1.3
+EQ_MID = 1.5
 EQ_HIGH = 1.0
 VOLUME = 1.0
 
@@ -158,7 +158,7 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
 
     # 3. ENVELOPE
     attack_len = ATTACK
-    if frequency > 1046 and is_drum:
+    if frequency > 1046 or is_drum:
         attack_len = min(0.25, ATTACK + 0.08)
     attack_samples = int(total_samples * attack_len)
     fixed_release_sec = 0.01 if is_drum else 0.05  # Longer release for drums
