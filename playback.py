@@ -9,9 +9,9 @@ import numpy as np
 import sounddevice as sd
 
 # Audio Settings
-EQ_LOW = 1.4
+EQ_LOW = 1.3
 EQ_MID = 1.6
-EQ_HIGH = 1.0
+EQ_HIGH = 0.06
 VOLUME = 0.8
 
 SAMPLE_RATE = 44100
@@ -138,13 +138,13 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
 
         # 1.5. SOFTEN HIGHER PITCHES
         if frequency > 2000:
-            val *= 0.45
+            val *= 0.35
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing for high notes
-        elif frequency > 1046:
-            val *= 0.55
+        elif frequency > 1500:
+            val *= 0.45
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing
         elif frequency > 1000:
-            val *= 0.65
+            val *= 0.55
 
         # 2. BASS REINFORCEMENT (The "Sub" Fix)
         if frequency < 261:
@@ -154,11 +154,11 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
             else:
                 sub = 1.0 * np.sin(1 * np.pi * frequency * t)
                 body = 0.6 * np.sin(4 * np.pi * frequency * t)
-            val = np.tanh((val + sub + body) / 1.5)
+            val = np.tanh((val + sub + body) / 1.2)
 
     # 3. ENVELOPE
     attack_len = ATTACK
-    if frequency > 1046 or is_drum:
+    if frequency > 1046 and is_drum:
         attack_len = min(0.25, ATTACK + 0.08)
     attack_samples = int(total_samples * attack_len)
     fixed_release_sec = 0.01 if is_drum else 0.05  # Longer release for drums
@@ -186,13 +186,13 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
     if frequency < 300:
         pan = 0  # Center bass
     elif frequency < 500:
-        pan = 0.1  # Close to center for lower mids
+        pan = 0.25  # Close to center for lower mids
     elif frequency < 2000:
-        pan = 0.5 + (frequency - 500) / 1500 * 0.4  # 0.5 to 0.9 for mids
+        pan = 0 + (frequency - 500) / 1500 * 0.4  # 0.5 to 0.9 for mids
     elif frequency < 6000:
-        pan = 0.9  # Wide for high mids
+        pan = 0.5  # Wide for high mids
     else:
-        pan = 0.5  # Hard pan for highs
+        pan = 1  # Hard pan for highs
 
     left_gain = math.sqrt((1.0 - np.clip(-pan, -1.0, 0)) / 2.0)
     right_gain = math.sqrt((1.0 + np.clip(pan, -1.0, 0)) / 2.0)
