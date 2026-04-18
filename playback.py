@@ -10,9 +10,9 @@ import sounddevice as sd
 
 # Audio Settings
 EQ_LOW = 1.4
-EQ_MID = 1.5
-EQ_HIGH = 0.02
-VOLUME = 0.6
+EQ_MID = 1.6
+EQ_HIGH = 0.1
+VOLUME = 0.8
 
 SAMPLE_RATE = 44100
 CHANNELS = 2
@@ -139,12 +139,12 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
         # 1.5. SOFTEN HIGHER PITCHES
         if frequency > 2000:
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing for high notes
-            val *= 0.35
+            val *= 0.55
         elif frequency > 1046:
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing
-            val *= 0.45
+            val *= 0.65
         elif frequency > 1000:
-            val *= 0.55
+            val *= 0.75
 
         # 2. BASS REINFORCEMENT (The "Sub" Fix)
         if frequency < 261:
