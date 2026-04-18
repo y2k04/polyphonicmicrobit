@@ -10,9 +10,9 @@ import sounddevice as sd
 
 # Audio Settings
 EQ_LOW = 1.3
-EQ_MID = 1.6
+EQ_MID = 1.4
 EQ_HIGH = 1.0
-VOLUME = 0.8
+VOLUME = 0.5
 
 SAMPLE_RATE = 44100
 CHANNELS = 2
@@ -127,10 +127,10 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
         val = np.random.normal(0, 1, total_samples)
         if frequency >= 30 and frequency <= 50:  # Hi-hats: sharper, higher frequency sound
             val = np.convolve(val, np.ones(5) / 5, mode='same')  # Very short smoothing for bright hi-hats
-            val *= 0.06  # Reduce volume to prevent drowning
+            val *= 0.16  # Reduce volume to prevent drowning
         else:  # Other drums: standard percussive
             val = np.convolve(val, np.ones(10) / 10, mode='same')
-            val *= 10.0  # Base volume for drums
+            val *= 12.0  # Base volume for drums
             frequency *= 2
     else:
         # 1. BASE WAVE
@@ -139,12 +139,12 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
         # 1.5. SOFTEN HIGHER PITCHES
         if frequency > 2000:
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing for high notes
-            val *= 0.45
+            val *= 0.55
         elif frequency > 1046:
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing
-            val *= 0.55
-        elif frequency > 1000:
             val *= 0.65
+        elif frequency > 1000:
+            val *= 0.75
 
         # 2. BASS REINFORCEMENT (The "Sub" Fix)
         if frequency < 261:
