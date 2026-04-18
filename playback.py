@@ -10,9 +10,9 @@ import sounddevice as sd
 
 # Audio Settings
 EQ_LOW = 1.3
-EQ_MID = 1.5
+EQ_MID = 1.6
 EQ_HIGH = 1.0
-VOLUME = 1.0
+VOLUME = 0.8
 
 SAMPLE_RATE = 44100
 CHANNELS = 2
