@@ -9,7 +9,7 @@ import numpy as np
 import sounddevice as sd
 
 # Audio Settings
-EQ_LOW = 1.3
+EQ_LOW = 1.4
 EQ_MID = 1.6
 EQ_HIGH = 1.0
 VOLUME = 0.8
@@ -138,13 +138,13 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
 
         # 1.5. SOFTEN HIGHER PITCHES
         if frequency > 2000:
-            val *= 0.55
+            val *= 0.45
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing for high notes
         elif frequency > 1046:
-            val *= 0.65
+            val *= 0.55
             val = np.convolve(val, np.ones(10) / 10, mode='same')  # Longer smoothing
         elif frequency > 1000:
-            val *= 0.75
+            val *= 0.65
 
         # 2. BASS REINFORCEMENT (The "Sub" Fix)
         if frequency < 261:
@@ -182,12 +182,20 @@ def generate_tone(frequency, duration_seconds, pan=0.0, is_drum=False):
     raw_signal = val * envelope * current_note_volume
     final_signal = np.tanh(raw_signal / 0.12) * 0.12
 
-    # Center low frequencies for solid bass
-    if frequency < 250:
-        pan = 0
+    # Frequency-dependent panning for optimal stereo balance
+    if frequency < 300:
+        pan = 0  # Center bass
+    elif frequency < 500:
+        pan = 0.1  # Close to center for lower mids
+    elif frequency < 2000:
+        pan = 0.5 + (frequency - 500) / 1500 * 0.4  # 0.5 to 0.9 for mids
+    elif frequency < 6000:
+        pan = 0.9  # Wide for high mids
+    else:
+        pan = 0.5  # Hard pan for highs
 
-    left_gain = math.sqrt((1.0 - np.clip(pan, -1.0, 1.0)) / 2.0)
-    right_gain = math.sqrt((1.0 + np.clip(pan, -1.0, 1.0)) / 2.0)
+    left_gain = math.sqrt((1.0 - np.clip(-pan, -1.0, 0)) / 2.0)
+    right_gain = math.sqrt((1.0 + np.clip(pan, -1.0, 0)) / 2.0)
     left = final_signal * left_gain
     right = final_signal * right_gain
     stereo = np.column_stack((left, right)).astype(np.float32)
