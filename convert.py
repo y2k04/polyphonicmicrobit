@@ -30,19 +30,20 @@ def midi_to_score():
     all_notes, active_notes = [], {}
 
     for track_idx, track in enumerate(mid.tracks):
-        is_drum_track = track_idx == 0 or any(msg.channel == 9 for msg in track if msg.type == 'note_on')  # Assume first track or has notes on channel 9
         abs_t = 0
         for msg in track:
+            if hasattr(msg, 'channel') and msg.channel == 9:
+                continue
             abs_t += msg.time
             eng_t = abs_t
             if msg.type == 'note_on' and msg.velocity > 0:
-                active_notes[(msg.note, track_idx)] = (eng_t, msg.channel == 9)
+                active_notes[(msg.note, track_idx)] = eng_t
             elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                 if (msg.note, track_idx) in active_notes:
-                    start, is_drum = active_notes[(msg.note, track_idx)]
+                    start = active_notes[(msg.note, track_idx)]
                     dur = max(1, eng_t - start)
-                    name = NOTE_MAP[msg.note % 12] + str((msg.note // 12) - 1) if not is_drum else f"P{msg.note}"
-                    all_notes.append({'start': start, 'end': start + dur, 'name': name, 'dur': dur, 'pitch': msg.note, 'is_drum': is_drum})
+                    name = NOTE_MAP[msg.note % 12] + str((msg.note // 12) - 1)
+                    all_notes.append({'start': start, 'end': start + dur, 'name': name, 'dur': dur, 'pitch': msg.note})
                     del active_notes[(msg.note, track_idx)]
 
     all_notes.sort(key=lambda x: (x['start'], -x['pitch']))
