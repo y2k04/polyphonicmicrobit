@@ -72,7 +72,7 @@ def note_to_frequency(note_str):
         raw_name = note_str.split(':')[0].upper()
         octave = int(raw_name[-1]) if raw_name[-1].isdigit() else 4
         note_name = raw_name[:-1] if raw_name[-1].isdigit() else raw_name
-        n = NOTE_MAP[note_name] + (octave + 2) * 12
+        n = NOTE_MAP[note_name] + (octave + 1) * 12
         return 440 * (2 ** ((n - 69) / 12))
     except:
         return 0
