@@ -3,7 +3,7 @@ import mido, os
 MIDI_INPUT = input('MIDI file path: ').replace("\\", "/")
 OUTPUT_FILE = "scores/" + input("Output filename: ") + ".txt"
 SONG_NAME = input("Song Name: ")
-AUTHOR = input("Author: ")
+ARTIST = input("Artist: ")
 
 NOTE_MAP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
@@ -37,13 +37,20 @@ def midi_to_score():
             abs_t += msg.time
             eng_t = abs_t
             if msg.type == 'note_on' and msg.velocity > 0:
-                active_notes[(msg.note, track_idx)] = eng_t
+                active_notes[(msg.note, track_idx)] = (eng_t, msg.velocity) 
             elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                 if (msg.note, track_idx) in active_notes:
-                    start = active_notes[(msg.note, track_idx)]
+                    start, velocity = active_notes[(msg.note, track_idx)] # Retrieve velocity
                     dur = max(1, eng_t - start)
                     name = NOTE_MAP[msg.note % 12] + str((msg.note // 12) - 1)
-                    all_notes.append({'start': start, 'end': start + dur, 'name': name, 'dur': dur, 'pitch': msg.note})
+                    all_notes.append({
+                        'start': start, 
+                        'end': start + dur, 
+                        'name': name, 
+                        'dur': dur, 
+                        'pitch': msg.note, 
+                        'vel': velocity * 2 # Scale MIDI 0-127 to your 0-255 target
+                    })
                     del active_notes[(msg.note, track_idx)]
 
     all_notes.sort(key=lambda x: (x['start'], -x['pitch']))
@@ -55,21 +62,21 @@ def midi_to_score():
         for v_idx in sorted(v_end.keys()):
             if v_end[v_idx] <= n['start']:
                 gap = n['start'] - v_end[v_idx]
-                if gap > 0: v_data[v_idx].append(f"-:{gap}")
-                v_data[v_idx].append(f"{n['name']}:{n['dur']}")
+                if gap > 0: v_data[v_idx].append(f"-:{gap}:0")
+                v_data[v_idx].append(f"{n['name']}:{n['dur']}:{n['vel']}")
                 v_end[v_idx] = n['end']
                 assigned = True
                 break
         if not assigned:
             idx = len(v_end) + 1
-            v_data[idx] = ([f"-:{n['start']}"] if n['start'] > 0 else []) + [f"{n['name']}:{n['dur']}"]
+            v_data[idx] = ([f"-:{n['start']}:0"] if n['start'] > 0 else []) + [f"{n['name']}:{n['dur']}:{n['vel']}"]
             v_end[idx] = n['end']
 
     for idx in v_data:
         if v_end[idx] < max_tick: v_data[idx].append(f"-:{max_tick - v_end[idx]}")
 
     with open(OUTPUT_FILE, "w", encoding='utf-8') as f:
-        f.write(f"SONG: {SONG_NAME}\nAUTHOR: {AUTHOR}\nBPM: {initial_bpm}\nTPB: {ticks_per_beat}\n\n[CONDUCTOR]\n")
+        f.write(f"SONG: {SONG_NAME}\nARTIST: {ARTIST}\nBPM: {initial_bpm}\nTPB: {ticks_per_beat}\n\n[CONDUCTOR]\n")
         if not unique_tempos: f.write(f"{initial_bpm}:{max(1, max_tick)}")
         else:
             for i in range(len(unique_tempos)):
