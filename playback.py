@@ -33,7 +33,7 @@ class AudioPlayer:
     # Manages loading a score file and generating/playing the corresponding audio mix.
     NOTE_MAP = {'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5, 'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11}
     DEFAULT_METADATA = {"SONG": "Unknown", "ARTIST": "Unknown", "BPM": 120.0, "TPB": 4}
-    
+
     def __init__(self):
         self._metadata: Dict[str, Any] = self.DEFAULT_METADATA.copy()
         self.score_file_path: str = ""
@@ -57,7 +57,7 @@ class AudioPlayer:
             with open(self.score_file_path, 'r', encoding='utf-8') as score:
                 for line in score:
                     line = line.strip()
-                    if not line or line.startswith('#'): 
+                    if not line or line.startswith('#'):
                         continue
 
                     if ":" in line and not line.startswith('[') and current_part_name is None:
@@ -90,7 +90,7 @@ class AudioPlayer:
         except IOError as e:
             print(f"Error reading score file: {e}")
             return False
-        
+
         return True
 
     @staticmethod
@@ -115,7 +115,7 @@ class AudioPlayer:
             midi_note = AudioPlayer.NOTE_MAP[base_name] + 12 * (octave + 1)
             return 440.0 * (2 ** ((midi_note - 69) / 12))
         return 0.0
-    
+
     def _generate_tone(self, frequency: float, duration_seconds: float, pan: float = 0.0, note_vol: float = 1.0) -> np.ndarray | None:
         if frequency <= 0 or duration_seconds <= 0: return None
 
@@ -157,14 +157,26 @@ class AudioPlayer:
         voice_count = len(self.parts)
         pan_positions = np.linspace(-0.7, 0.7, voice_count) if voice_count > 1 else [0.0]
         events: List[tuple[float, np.ndarray]] = []
-        
+
+        # Calculate overall notes/items to build a smooth global progress indicator
+        total_items = sum(len(score_string.split()) for score_string in self.parts.values())
+        items_processed = 0
+
         for voice_idx, part_name in enumerate(self.parts.keys()):
             pan = pan_positions[voice_idx]
             current_time = 0.0
-            tick_ptr = 0 
+            tick_ptr = 0
             score_string = self.parts[part_name]
-            
+
             for item in score_string.split():
+                items_processed += 1
+                if total_items > 0:
+                    progress = int(30 * (items_processed / total_items))
+                    bar = "█" * progress + "░" * (30 - progress)
+                    percentage = int(100 * items_processed / total_items)
+                    sys.stdout.write(f"\r Building Mix:  [{bar}] {percentage}% ({part_name}) \033[K")
+                    sys.stdout.flush()
+
                 if ":" not in item: continue
                 try:
                     parts = item.split(':')
@@ -174,7 +186,7 @@ class AudioPlayer:
                     else:
                         note, duration_ticks_str = parts
                         volume_val = 1.0
-                    
+
                     duration_ticks = int(duration_ticks_str)
                 except ValueError:
                     continue
@@ -187,7 +199,7 @@ class AudioPlayer:
                         if t <= time_check_ptr:
                             active_bpm = self.tempo_map[t]
                             break
-                    
+
                     if active_bpm > 0:
                         time_for_one_tick = (60.0 / active_bpm) / ticks_per_beat
                         total_seconds_for_note += time_for_one_tick
@@ -197,23 +209,24 @@ class AudioPlayer:
                     samples = self._generate_tone(hz, total_seconds_for_note, pan=pan, note_vol=volume_val)
                     if samples is not None:
                         events.append((current_time, samples))
-                
+
                 current_time += total_seconds_for_note
                 tick_ptr += duration_ticks
 
+        print()  # Add a clean newline after building completes
         if not events: return np.zeros((1, CHANNELS), dtype=np.float32), 0.0
-        
+
         max_time = max(e[0] + len(e[1])/SAMPLE_RATE for e in events)
         total_samples = int(math.ceil(max_time * SAMPLE_RATE))
         mix = np.zeros((total_samples, CHANNELS), dtype=np.float32)
-        
+
         for start_time, samples in events:
             start_idx = int(round(start_time * SAMPLE_RATE))
             end_idx = start_idx + len(samples)
             if start_idx < total_samples:
                 actual_end = min(end_idx, total_samples)
                 mix[start_idx:actual_end] += samples[:actual_end - start_idx]
-                
+
         return np.clip(mix, -1.0, 1.0), max_time
 
     def run_conductor_ui(self, mixed_buffer, total_seconds):
@@ -227,7 +240,7 @@ class AudioPlayer:
 
             while True:
                 elapsed = time.perf_counter() - start_time
-                if elapsed >= total_seconds: 
+                if elapsed >= total_seconds:
                     break
                 progress = int(30 * min(elapsed / total_seconds, 1.0))
                 bar = "█" * progress + "░" * (30 - progress)
@@ -253,7 +266,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Play a structured score file.")
     parser.add_argument("score_file", help="The structured score text file.")
     args = parser.parse_args()
-    
+
     player = AudioPlayer()
     if player.load_score_file(args.score_file):
         player.play_score()
