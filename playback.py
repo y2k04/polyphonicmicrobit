@@ -39,7 +39,7 @@ class AudioPlayer:
         self.score_file_path: str = ""
         self.parts: Dict[str, str] = {}
         self.tempo_map: Dict[int, float] = {}
-        self.frequency_ranges = {'LOW': self._note_to_frequency('G3'), 'HIGH': self._note_to_frequency('C6')}
+        self.frequency_ranges = {'LOW': self._note_to_frequency('G3'), 'HIGH': self._note_to_frequency('C5')}
 
     def load_score_file(self, filename: str) -> bool:
         """Loads metadata and structured parts from the specified score text file."""
