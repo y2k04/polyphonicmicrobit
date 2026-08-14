@@ -18,7 +18,7 @@ except ImportError as e:
 # Global Constants (Assuming standard defaults)
 SAMPLE_RATE = 44100
 CHANNELS = 2
-VOLUME = 1.2
+VOLUME = 2
 
 EQ_LOW = 1
 EQ_MID = 1
@@ -39,7 +39,7 @@ class AudioPlayer:
         self.score_file_path: str = ""
         self.parts: Dict[str, str] = {}
         self.tempo_map: Dict[int, float] = {}
-        self.frequency_ranges = {'LOW': self._note_to_frequency('G3'), 'HIGH': self._note_to_frequency('C5')}
+        self.frequency_ranges = {'LOW': self._note_to_frequency('G3'), 'HIGH': self._note_to_frequency('C6')}
 
     def load_score_file(self, filename: str) -> bool:
         """Loads metadata and structured parts from the specified score text file."""
@@ -143,7 +143,7 @@ class AudioPlayer:
 
         # Gain & Pan
         current_vol = VOLUME * note_vol * (EQ_LOW if frequency < self.frequency_ranges['LOW'] else EQ_HIGH if frequency > self.frequency_ranges['HIGH'] else EQ_MID)
-        final_signal = np.tanh((val * envelope * current_vol) / 0.12) * 0.12
+        final_signal = VOLUME * np.tanh((val * envelope * current_vol) / 0.12) * 0.12
 
         left_gain = math.sqrt((1.0 - np.clip(-pan, -1.0, 0)) / 2.0)
         right_gain = math.sqrt((1.0 + np.clip(pan, -1.0, 0)) / 2.0)
